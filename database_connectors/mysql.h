@@ -9,8 +9,7 @@
 #include <iostream>
 //Custom
 #include "json_settings/jsonsettings.h"
-#include "log_writer/logwriter.h"
-#include "mysql_oot_dialogs/inputsettingsthread.hpp"
+#include "oot_dialogs/inputsettingsthread.hpp"
 
 class MySQL : public QObject
 {

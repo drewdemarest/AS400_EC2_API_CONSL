@@ -12,7 +12,7 @@ int main(int argc, char *argv[])
     QCoreApplication a(argc, argv);
 
     LogWriter logWriter;
-    AS400 as400();
+    AS400 as400;
     MySQL mysql;
     QObject::connect(&as400, &AS400::debugMessage, &logWriter, &LogWriter::writeLogEntry);
     QObject::connect(&mysql, &MySQL::debugMessage, &logWriter, &LogWriter::writeLogEntry);
@@ -20,10 +20,11 @@ int main(int argc, char *argv[])
     QObject::connect(&as400, &AS400::customerChainResults, &mysql, &MySQL::exportCustomerChainResults);
 
     mysql.init();
+    as400.init();
 
     while(true)
     {
-        as400.getInvoiceData(QDate::currentDate().addDays(-1460), QDate::currentDate(), 10000);
+        as400.getInvoiceData(QDate::currentDate().addDays(-2), QDate::currentDate(), 10000);
         as400.getCustomerChains(10000);
         qDebug() << "Waiting 43200 seconds until next upload.";
         sleep(43200);

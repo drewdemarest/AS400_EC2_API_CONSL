@@ -24,9 +24,10 @@ class InputSettingsThread : public QThread
         if(!(inputNewSettingsStr == "y" || inputNewSettingsStr == "n"))
         {
             emit result(false);
-            emit debugMessage("MySQL user input error: incorrect user input for using existing settings."
-                              " Input not y or n. "
-                              "Using existing settings.");
+            emit debugMessage("Settings user input error: "
+                              "incorrect user input for using existing settings. "
+                              "Input not y or n. "
+                              "Using existing settings. ");
         }
         QTimer waitASec;
         waitASec.setSingleShot(true);

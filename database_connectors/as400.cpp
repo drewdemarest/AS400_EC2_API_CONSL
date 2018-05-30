@@ -1,11 +1,89 @@
 #include "as400.h"
 
+AS400::AS400(QObject *parent) : QObject(parent)
+{
+}
+
 AS400::AS400(const QString &systemIP, const QString &username, const QString &password, QObject *parent) : QObject(parent)
 {
-    connectString_ = "DRIVER={iSeries Access ODBC Driver};SYSTEM=" + systemIP +";";
-    username_ = username;
-    password_ = password;
+    AS400Settings_["connectString"] = "DRIVER={iSeries Access ODBC Driver};SYSTEM=" + systemIP +";";
+    AS400Settings_["username"] = username;
+    AS400Settings_["password"] = password;
 }
+
+void AS400::init()
+{
+    connect(&settings_, &JsonSettings::debugMessage, this, &AS400::debugMessage);
+
+    std::cout << "Input new AS400 settings? y/n: ";
+
+    //Total hack to make an input dialog that just expires
+    //and sets iteself to a default value.
+    InputSettingsThread* settingsThread = new InputSettingsThread();
+    connect(settingsThread, &InputSettingsThread::result, this, &AS400::handleSettingsDialog);
+    connect(settingsThread, &InputSettingsThread::debugMessage, this, &AS400::debugMessage);
+    connect(settingsThread, &InputSettingsThread::finished, settingsThread, &QObject::deleteLater);
+    settingsThread->start();
+
+    QTimer timer;
+    timer.setSingleShot(true);
+    timer.start(30000);
+    while(timer.isActive() && !settingsThread->isFinished())
+    {
+        qApp->processEvents();
+    }
+    if(!settingsThread->isFinished())
+    {
+        qDebug() << endl;
+        emit debugMessage("No response from user after 30sec, using any existing settings");
+        settingsThread->quit();
+        handleSettingsDialog(false);
+        settingsThread->deleteLater();
+    }
+}
+
+void AS400::handleSettingsDialog(bool inputNewSettings)
+{
+    if(inputNewSettings)
+        inputAS400Settings();
+
+    if(!inputNewSettings)
+        AS400Settings_ = settings_.loadSettings(QFile(qApp->applicationDirPath() + "/as400settings.db"), AS400Settings_);
+}
+
+void AS400::inputAS400Settings()
+{
+    QTextStream s(stdin);
+    QString password;
+    QString driver;
+    QString username;
+    QString hostName;
+
+    std::cout << "Set database hostname or IP: ";
+    hostName = s.readLine();
+
+    std::cout << "Set ODBC driver e.g. iSeries Access ODBC Driver: ";
+    driver = s.readLine();
+
+    std::cout << "Set username: ";
+    username = s.readLine();
+
+    std::cout << "Set password: ";
+    password = s.readLine();
+
+    qDebug() << "Please review settings.";
+    qDebug() << password;
+    qDebug() << username;
+    qDebug() << driver;
+    qDebug() << hostName;
+
+    AS400Settings_["password"] = password;
+    AS400Settings_["username"] = username;
+    AS400Settings_["connectString"] = "DRIVER={" + driver + "};SYSTEM=" + hostName + ";";;
+
+    settings_.saveSettings(QFile(qApp->applicationDirPath() + "/as400settings.db"), AS400Settings_);
+}
+
 
 bool AS400::getInvoiceData(const QDate &minDate, const QDate &maxDate, const int chunkSize)
 {
@@ -67,12 +145,12 @@ bool AS400::getRouteAssignmentData()
 bool AS400::queryAS400(const AS400QueryType queryType, const QString &queryString, const int chunkSize)
 {
     bool success = false;
-    emit debugMessage(connectString_);
+    emit debugMessage(AS400Settings_["connectString"].toString());
     {
         QSqlDatabase odbc = QSqlDatabase::addDatabase("QODBC", "AS400");
-        odbc.setUserName(username_);
-        odbc.setPassword(password_);
-        odbc.setDatabaseName(connectString_);
+        odbc.setUserName(AS400Settings_["username"].toString());
+        odbc.setPassword(AS400Settings_["password"].toString());
+        odbc.setDatabaseName(AS400Settings_["connectString"].toString());
 
         if(odbc.open())
         {
