@@ -24,10 +24,11 @@ signals:
 
 public slots:
     bool exportInvoiceResults(QMap<QString, QVariantList> invoiceResults);
-    void debugTransfer(QString dbg);
+    bool exportCustomerChainResults(QMap<QString, QVariantList> invoiceResults);
     void handleSettingsDialog(bool inputNewSettings);
 
 private:
+    bool exportResults(const QString &tableName, QMap<QString, QVariantList> invoiceResults);
     void inputMySQLSettings();
     JsonSettings settings_;
     QJsonObject mySQLSettings_ =    {{"caStr",           QJsonValue()},
@@ -41,8 +42,8 @@ private:
 
 
     QStringList generateValueTuples(QMap<QString, QVariantList> invoiceResults);
-    bool executeQueryAsBatch(QSqlDatabase &db, QMap<QString, QVariantList> invoiceResults);
-    bool executeQueryAsString(QSqlDatabase &db, QMap<QString, QVariantList> invoiceResults);
+    bool executeQueryAsBatch(QSqlDatabase &db, const QString &tableName, QMap<QString, QVariantList> invoiceResults);
+    bool executeQueryAsString(QSqlDatabase &db, const QString &tableName, QMap<QString, QVariantList> invoiceResults);
     void thingToForward(QString dbg);
 };
 

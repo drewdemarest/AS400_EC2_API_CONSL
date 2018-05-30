@@ -9,60 +9,47 @@ AS400::AS400(const QString &systemIP, const QString &username, const QString &pa
 
 bool AS400::getInvoiceData(const QDate &minDate, const QDate &maxDate, const int chunkSize)
 {
-    bool success = false;
-    emit debugMessage(connectString_);
-    {
-        QSqlDatabase odbc = QSqlDatabase::addDatabase("QODBC", "AS400");
-        odbc.setUserName(username_);
-        odbc.setPassword(password_);
-        odbc.setDatabaseName(connectString_);
+    QString queryString("SELECT invn AS \"invoiceNumber\","
+                        "whsn AS \"warehouseNumber\", "
+                        "rten AS \"route\", "
+                        "stpn AS \"stopNumber\", "
+                        "crin AS \"credit\", "
+                        "dtei AS \"invoiceDate\", "
+                        "dtes AS \"shipDate\", "
+                        "dtet AS \"orderDate\", "
+                        "timo AS \"orderTime\", "
+                        "exsh AS \"weight\", "
+                        "excb AS \"caseCube\", "
+                        "qysa AS \"casesShipped\", "
+                        "qyoa AS \"casesOrdered\", "
+                        "exsn AS \"netSales\", "
+                        "exac AS \"productCost\", "
+                        "exgp AS \"profit\", "
+                        "ppft AS \"profitPercent\", "
+                        "cusn AS \"customerNumber\", "
+                        "slnb AS \"salesRep\", "
+                        "demp AS \"driverNumber\", "
+                        "tknb AS \"truckNumber\"  "
+                        "FROM pwruser.sqlinvhdl0 "
+                        "WHERE pday "
+                        "BETWEEN \'"
+                        +minDate.toString("yyyy-MM-dd")
+                        +"\' AND \'"
+                        +maxDate.toString("yyyy-MM-dd")+"\'");
 
-        if(odbc.open())
-        {
-            QSqlQuery query(odbc);
-            QString queryString("SELECT invn AS \"invoiceNumber\","
-                                "whsn AS \"warehouseNumber\", "
-                                "rten AS \"route\", "
-                                "stpn AS \"stopNumber\", "
-                                "crin AS \"credit\", "
-                                "dtei AS \"invoiceDate\", "
-                                "dtes AS \"shipDate\", "
-                                "dtet AS \"orderDate\", "
-                                "timo AS \"orderTime\", "
-                                "exsh AS \"weight\", "
-                                "excb AS \"caseCube\", "
-                                "qysa AS \"casesShipped\", "
-                                "qyoa AS \"casesOrdered\", "
-                                "exsn AS \"netSales\", "
-                                "exac AS \"productCost\", "
-                                "exgp AS \"profit\", "
-                                "ppft AS \"profitPercent\", "
-                                "cusn AS \"customerNumber\", "
-                                "slnb AS \"salesRep\", "
-                                "demp AS \"driverNumber\", "
-                                "tknb AS \"truckNumber\"  "
-                                "FROM pwruser.sqlinvhdl0 "
-                                "WHERE pday "
-                                "BETWEEN \'"+minDate.toString("yyyy-MM-dd")+"\' AND \'"+maxDate.toString("yyyy-MM-dd")+"\'");
+    return queryAS400(AS400QueryType::Invoice, queryString, chunkSize);
+}
 
-            emit debugMessage(QString("Running against AS400 with a chunk size of " + QString::number(chunkSize)));
-            emit debugMessage(QString("If you have an overflow, reduce chunk size."));
-            emit debugMessage(queryString);
+bool AS400::getCustomerChains(const int chunkSize)
+{
+    QString queryString = "SELECT CAST(BBSCMPN AS INT) AS \"companyNumber\", "
+                          "CAST(BBSDIVN AS INT) AS \"divisionNumber\", "
+                          "CAST(BBSDPTN AS INT) AS \"departmentNumber\", "
+                          "REPLACE(BBSCSCD,' ','') AS \"chainStoreCode\", "
+                          "BBSCTDC AS \"chainDescription\" "
+                          "FROM PWRDTA.BBSCHNHP";
 
-            success = query.exec(queryString);
-
-            processQuery(query, chunkSize);
-        }
-        else
-        {
-            emit debugMessage("There was an error with AS400.");
-            emit debugMessage(odbc.lastError().text());
-            success = false;
-        }
-    }
-    emit debugMessage("Cleaning up AS400 connection.");
-    QSqlDatabase::removeDatabase("AS400");
-    return success;
+    return queryAS400(AS400QueryType::CustomerChain, queryString,chunkSize);
 }
 
 bool AS400::getCustomerData()
@@ -77,40 +64,103 @@ bool AS400::getRouteAssignmentData()
     return success;
 }
 
-void AS400::processQuery(QSqlQuery &query,const int chunkSize)
+bool AS400::queryAS400(const AS400QueryType queryType, const QString &queryString, const int chunkSize)
+{
+    bool success = false;
+    emit debugMessage(connectString_);
+    {
+        QSqlDatabase odbc = QSqlDatabase::addDatabase("QODBC", "AS400");
+        odbc.setUserName(username_);
+        odbc.setPassword(password_);
+        odbc.setDatabaseName(connectString_);
+
+        if(odbc.open())
+        {
+            QSqlQuery query(odbc);
+
+            emit debugMessage(QString("Running against AS400 with a chunk size of " + QString::number(chunkSize)));
+            emit debugMessage(QString("If you have an overflow, reduce chunk size."));
+            emit debugMessage(queryString);
+
+            if(query.exec(queryString))
+            {
+                success = true;
+                processQuery(queryType, query, chunkSize);
+            }
+            else
+            {
+                success = false;
+                emit debugMessage("AS400 Query Error: " + query.lastError().text());
+            }
+
+        }
+        else
+        {
+            emit debugMessage("There was an error with AS400.");
+            emit debugMessage(odbc.lastError().text());
+            success = false;
+        }
+    }
+    emit debugMessage("Cleaning up AS400 connection.");
+    QSqlDatabase::removeDatabase("AS400");
+    return success;
+}
+
+void AS400::processQuery(const AS400QueryType queryType, QSqlQuery &query,const int chunkSize)
 {
     int recordCounter = 0;
+    QMap<QString,QVariantList> sqlData;
 
     while(query.next())
     {
         if(recordCounter == chunkSize)
         {
             //Count the amt of records.
-            //qDebug() << invoiceDataFmt_.first().size();
-            emit debugMessage(QString("Retrieved" +  QString::number(invoiceDataFmt_.first().size()) + " records from AS400."));
-            emit invoiceDataResults(invoiceDataFmt_);
-            for(auto key: invoiceDataFmt_.keys())
+            emit debugMessage(QString("Retrieved " +  QString::number(sqlData.first().size()) + " records from AS400."));
+
+            switch (queryType)
             {
-                invoiceDataFmt_[key].clear();
+            case AS400QueryType::Invoice :
+                emit invoiceDataResults(sqlData);
+                break;
+
+            case AS400QueryType::CustomerChain :
+                emit customerChainResults(sqlData);
+                break;
             }
-            invoiceDataFmt_.clear();
+
+            for(auto key: sqlData.keys())
+            {
+                sqlData[key].clear();
+            }
+            sqlData.clear();
             recordCounter = 0;
         }
 
         for(int j = 0; j < query.record().count(); ++j)
         {
-            invoiceDataFmt_[query.record().fieldName(j)].append(query.value(j));
+            sqlData[query.record().fieldName(j)].append(query.value(j));
         }
         ++recordCounter;
     }
 
     //Count the amt of records.
-    emit debugMessage(QString("Retrieved " +  QString::number(invoiceDataFmt_.first().size()) + " records from AS400."));
-    emit invoiceDataResults(invoiceDataFmt_);
-    for(auto key: invoiceDataFmt_.keys())
+    emit debugMessage(QString("Retrieved " +  QString::number(sqlData.first().size()) + " records from AS400."));
+
+    switch (queryType)
     {
-        invoiceDataFmt_[key].clear();
+    case AS400QueryType::Invoice :
+        emit invoiceDataResults(sqlData);
+        break;
+
+    case AS400QueryType::CustomerChain :
+        emit customerChainResults(sqlData);
+        break;
     }
-    invoiceDataFmt_.clear();
+
+    for(auto key: sqlData.keys())
+        sqlData[key].clear();
+
+    sqlData.clear();
 }
 

@@ -123,6 +123,18 @@ void MySQL::inputMySQLSettings()
 
 bool MySQL::exportInvoiceResults(QMap<QString, QVariantList> invoiceResults)
 {
+    QString tableName = "invoice";
+    return exportResults(tableName,invoiceResults);
+}
+
+bool MySQL::exportCustomerChainResults(QMap<QString, QVariantList> invoiceResults)
+{
+    QString tableName = "customerChain";
+    return exportResults(tableName,invoiceResults);
+}
+
+bool MySQL::exportResults(const QString &tableName, QMap<QString, QVariantList> invoiceResults)
+{
     bool success = false;
     if(invoiceResults.isEmpty())
         return success;
@@ -140,9 +152,9 @@ bool MySQL::exportInvoiceResults(QMap<QString, QVariantList> invoiceResults)
 
         if(sslDB.open())
         {
-            success = executeQueryAsString(sslDB, invoiceResults);
+            success = executeQueryAsString(sslDB,tableName, invoiceResults);
             if(!success)
-                success = executeQueryAsBatch(sslDB, invoiceResults);
+                success = executeQueryAsBatch(sslDB,tableName, invoiceResults);
         }
         else
         {
@@ -158,11 +170,48 @@ bool MySQL::exportInvoiceResults(QMap<QString, QVariantList> invoiceResults)
     return success;
 }
 
-void MySQL::debugTransfer(QString dbg)
+bool MySQL::executeQueryAsString(QSqlDatabase &db, const QString &tableName, QMap<QString, QVariantList> invoiceResults)
 {
-    qDebug() << "From debugTransfer:" << dbg;
+    bool success = false;
+    QSqlQuery query(db);
+    QStringList valueTuples;
+    QString queryString = "INSERT INTO " + tableName +" (";
+    QStringList columnsToUpdate;
+    QStringList updateStatements;
 
-    emit debugMessage(dbg);
+    for(auto key:invoiceResults.keys())
+    {
+        QString keyTick = "`" + key + "`";
+        columnsToUpdate.append(keyTick);
+        updateStatements.append(keyTick + "=VALUES(" + keyTick + ")");
+    }
+
+    valueTuples = generateValueTuples(invoiceResults);
+    queryString.append(columnsToUpdate.join(", ") + ") VALUES " + valueTuples.join(", "));
+    queryString.append(" ON DUPLICATE KEY UPDATE " + updateStatements.join(", "));
+
+
+    emit debugMessage(QString("Query length is " + QString::number(queryString.size()) + " char."));
+    emit debugMessage(QString("Inserting " + QString::number(invoiceResults.first().size()) + " records into MySQL"));
+
+    db.driver()->beginTransaction();
+
+    if(query.exec(queryString))
+    {
+        success = true;
+        emit debugMessage("MySQL string upload completed.");
+    }
+    else
+    {
+        success = false;
+        emit debugMessage("Error in MySQL string query...");
+        emit debugMessage(query.lastError().text());
+    }
+    db.driver()->commitTransaction();
+
+
+
+    return success;
 }
 
 QStringList MySQL::generateValueTuples(QMap<QString, QVariantList> invoiceResults)
@@ -176,6 +225,13 @@ QStringList MySQL::generateValueTuples(QMap<QString, QVariantList> invoiceResult
         for(auto key:invoiceResults.keys())
         {
             switch(invoiceResults[key][i].type()) {
+
+            case QVariant::Type::Int:
+                if(invoiceResults[key][i].isNull())
+                    valueList.append("NULL");
+                else
+                    valueList.append(invoiceResults[key][i].toString());
+                break;
 
             case QVariant::Type::LongLong:
                 if(invoiceResults[key][i].isNull())
@@ -206,7 +262,10 @@ QStringList MySQL::generateValueTuples(QMap<QString, QVariantList> invoiceResult
                 break;
 
             default:
-                emit debugMessage(QString("Unsupported data type from sqlite database " + invoiceResults[key][i].toString()));
+                emit debugMessage(QString("Unsupported data type from AS400 database "
+                                          + invoiceResults[key][i].toString()
+                                          + " "
+                                          + invoiceResults[key][i].type()));
                 break;
             }
         }
@@ -215,68 +274,44 @@ QStringList MySQL::generateValueTuples(QMap<QString, QVariantList> invoiceResult
     return valueTuples;
 }
 
-bool MySQL::executeQueryAsString(QSqlDatabase &db, QMap<QString, QVariantList> invoiceResults)
-{
-    bool success = false;
-    QSqlQuery query(db);
-    QStringList valueTuples;
-    QString queryString = "REPLACE INTO invoice (";
-    QStringList columnsToUpdate;
-
-    for(auto key:invoiceResults.keys())
-        columnsToUpdate.append("`" + key + "`");
-
-    valueTuples = generateValueTuples(invoiceResults);
-    queryString.append(columnsToUpdate.join(", ") + ") VALUES " + valueTuples.join(", "));
-
-    emit debugMessage(QString("Query length is " + QString::number(queryString.size()) + " char."));
-    emit debugMessage(QString("Inserting " + QString::number(invoiceResults.first().size()) + " records into MySQL"));
-
-    db.driver()->beginTransaction();
-    success = query.exec(queryString);
-    db.driver()->commitTransaction();
-
-    if(success)
-        emit debugMessage("MySQL string upload completed.");
-    else
-    {
-        emit debugMessage("Error in MySQL string query...");
-        emit debugMessage(query.lastError().text());
-    }
-
-    return success;
-}
-
-bool MySQL::executeQueryAsBatch(QSqlDatabase &db, QMap<QString, QVariantList> invoiceResults)
+bool MySQL::executeQueryAsBatch(QSqlDatabase &db, const QString &tableName, QMap<QString, QVariantList> invoiceResults)
 {
     emit debugMessage("Falling back to batch insert.");
 
     bool success = false;
     int recordCount = 0;
-    QString queryString = "REPLACE INTO invoice (";
+    QString queryString = "INSERT INTO " + tableName + " (";
     QStringList columnsToUpdate;
     QStringList fieldList;
+    QStringList updateStatements;
     QSqlQuery query(db);
 
     for(auto key:invoiceResults.keys())
     {
-        columnsToUpdate.append("`" + key + "`");
+        QString keyTick = "`" + key + "`";
+        columnsToUpdate.append(keyTick);
+        updateStatements.append(keyTick + "=VALUES(" + keyTick + ")");
         fieldList.append("?");
     }
 
     recordCount = invoiceResults.first().size();
 
     queryString.append(columnsToUpdate.join(",") + ") VALUES (" + fieldList.join(", ") + ")");
+    queryString.append(" ON DUPLICATE KEY UPDATE " + updateStatements.join(", "));
     query.prepare(queryString);
 
     for(auto results:invoiceResults)
         query.addBindValue(results);
 
     emit debugMessage("Beginning MySQL fallback batch insert of " + QString::number(recordCount) + " length");
-    emit debugMessage(queryString);
 
     db.driver()->beginTransaction();
-    success = query.execBatch();
+
+    if(query.execBatch())
+        success = true;
+    else
+        emit debugMessage("Query Error in batch insert. Last error is: " + query.lastError().text());
+
     db.driver()->commitTransaction();
 
     if(success)

@@ -5,6 +5,8 @@
 #include <QtSql>
 #include <QtCore>
 
+enum AS400QueryType {Invoice, CustomerChain};
+
 class AS400 : public QObject
 {
     Q_OBJECT
@@ -13,6 +15,8 @@ public:
                    const QString &username,
                    const QString &password,
                    QObject *parent = nullptr);
+
+    bool getCustomerChains(const int chunkSize);
 
     bool getInvoiceData(const QDate &minDate,
                         const QDate &maxDate,
@@ -24,6 +28,7 @@ public:
 
 signals:
     void invoiceDataResults(QMap<QString,QVariantList> sqlResults);
+    void customerChainResults(QMap<QString,QVariantList> sqlResults);
     void customerDataResults(QMap<QString,QVariantList> sqlResults);
     void routeAssignmentResults(QMap<QString,QVariantList> sqlResults);
     void debugMessage(QString dbg);
@@ -31,12 +36,12 @@ signals:
 public slots:
 
 private:
-    void processQuery(QSqlQuery & query, const int chunkSize);
+    bool queryAS400(const AS400QueryType queryType, const QString &queryString, const int chunkSize);
+    void processQuery(const AS400QueryType queryType, QSqlQuery &query, const int chunkSize);
     QString connectString_;
     QString username_;
     QString password_;
     //Data Formats
-    QMap<QString,QVariantList> invoiceDataFmt_ {};
 };
 
 #endif // AS400_H
