@@ -20,11 +20,13 @@ SOURCES += \
     database_connectors/as400.cpp \
     database_connectors/mysql.cpp \
     log_writer/logwriter.cpp \
-    json_settings/jsonsettings.cpp
+    json_settings/jsonsettings.cpp \
+    upload/uploadschedule.cpp
 
 HEADERS += \
     database_connectors/as400.h \
     database_connectors/mysql.h \
     log_writer/logwriter.h \
     json_settings/jsonsettings.h \
-    database_connectors/oot_dialogs/inputsettingsthread.hpp
+    database_connectors/oot_dialogs/inputsettingsthread.hpp \
+    upload/uploadschedule.h
