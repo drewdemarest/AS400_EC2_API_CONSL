@@ -79,7 +79,9 @@ void AS400::inputAS400Settings()
 
     AS400Settings_["password"] = password;
     AS400Settings_["username"] = username;
-    AS400Settings_["connectString"] = "DRIVER={" + driver + "};SYSTEM=" + hostName + ";";;
+    AS400Settings_["driver"] = "DRIVER={" + driver + "};";
+    AS400Settings_["system"] = "SYSTEM=" + hostName + ";";
+    AS400Settings_["connectString"] = "DRIVER={" + driver + "};SYSTEM=" + hostName + ";";
 
     settings_.saveSettings(QFile(qApp->applicationDirPath() + "/as400settings.db"), AS400Settings_);
 }
