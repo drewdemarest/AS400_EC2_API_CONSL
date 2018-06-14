@@ -22,13 +22,16 @@ signals:
     void debugMessage(QString dbg);
 
 public slots:
-    bool exportInvoiceResults(QMap<QString, QVariantList> invoiceResults);
-    bool exportCustomerChainResults(QMap<QString, QVariantList> invoiceResults);
-    void handleSettingsDialog(bool inputNewSettings);
+    bool exportInvoiceResults(QMap<QString, QVariantList> sqlResutls);
+    bool exportCustomerChainResults(QMap<QString, QVariantList> sqlResutls);
+    bool exportOpenOrderHeaderResult(bool needToTruncate, QMap<QString, QVariantList> sqlResutls);
+    bool exportOpenOrderDetailResult(bool needToTruncate, QMap<QString, QVariantList> sqlResutls);
 
 private:
+    bool truncateATable(const QString &tableName);
     bool exportResults(const QString &tableName, QMap<QString, QVariantList> invoiceResults);
     void inputMySQLSettings();
+    QString dbPath_ = qApp->applicationDirPath() + "/mysqlsettings.db";
     JsonSettings settings_;
     QJsonObject mySQLSettings_ =    {{"caStr",           QJsonValue()},
                                      {"clientKeyStr",    QJsonValue()},

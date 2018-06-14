@@ -2,90 +2,22 @@
 
 AS400::AS400(QObject *parent) : QObject(parent)
 {
+    AS400Settings_ = settings_.loadSettings(QFile(dbPath_), AS400Settings_);
 }
 
 AS400::AS400(const QString &systemIP, const QString &username, const QString &password, QObject *parent) : QObject(parent)
 {
-    AS400Settings_["connectString"] = "DRIVER={iSeries Access ODBC Driver};SYSTEM=" + systemIP +";";
+    AS400Settings_["driver"] = "iSeries Access ODBC Driver";
+    AS400Settings_["system"] = systemIP;
     AS400Settings_["username"] = username;
     AS400Settings_["password"] = password;
+    settings_.saveSettings(QFile(dbPath_), AS400Settings_);
 }
 
 void AS400::init()
 {
     connect(&settings_, &JsonSettings::debugMessage, this, &AS400::debugMessage);
-
-    std::cout << "Input new AS400 settings? y/n: ";
-
-    //Total hack to make an input dialog that just expires
-    //and sets iteself to a default value.
-    InputSettingsThread* settingsThread = new InputSettingsThread();
-    connect(settingsThread, &InputSettingsThread::result, this, &AS400::handleSettingsDialog);
-    connect(settingsThread, &InputSettingsThread::debugMessage, this, &AS400::debugMessage);
-    connect(settingsThread, &InputSettingsThread::finished, settingsThread, &QObject::deleteLater);
-    settingsThread->start();
-
-    QTimer timer;
-    timer.setSingleShot(true);
-    timer.start(30000);
-    while(timer.isActive() && !settingsThread->isFinished())
-    {
-        qApp->processEvents();
-    }
-    if(!settingsThread->isFinished())
-    {
-        qDebug() << endl;
-        emit debugMessage("No response from user after 30sec, using any existing settings");
-        settingsThread->quit();
-        handleSettingsDialog(false);
-        settingsThread->deleteLater();
-    }
 }
-
-void AS400::handleSettingsDialog(bool inputNewSettings)
-{
-    if(inputNewSettings)
-        inputAS400Settings();
-
-    if(!inputNewSettings)
-        AS400Settings_ = settings_.loadSettings(QFile(qApp->applicationDirPath() + "/as400settings.db"), AS400Settings_);
-}
-
-void AS400::inputAS400Settings()
-{
-    QTextStream s(stdin);
-    QString password;
-    QString driver;
-    QString username;
-    QString hostName;
-
-    std::cout << "Set database hostname or IP: ";
-    hostName = s.readLine();
-
-    std::cout << "Set ODBC driver e.g. iSeries Access ODBC Driver: ";
-    driver = s.readLine();
-
-    std::cout << "Set username: ";
-    username = s.readLine();
-
-    std::cout << "Set password: ";
-    password = s.readLine();
-
-    qDebug() << "Please review settings.";
-    qDebug() << password;
-    qDebug() << username;
-    qDebug() << driver;
-    qDebug() << hostName;
-
-    AS400Settings_["password"] = password;
-    AS400Settings_["username"] = username;
-    AS400Settings_["driver"] = "DRIVER={" + driver + "};";
-    AS400Settings_["system"] = "SYSTEM=" + hostName + ";";
-    AS400Settings_["connectString"] = "DRIVER={" + driver + "};SYSTEM=" + hostName + ";";
-
-    settings_.saveSettings(QFile(qApp->applicationDirPath() + "/as400settings.db"), AS400Settings_);
-}
-
 
 bool AS400::getInvoiceData(const QDate &minDate, const QDate &maxDate, const int chunkSize)
 {
@@ -120,6 +52,7 @@ bool AS400::getInvoiceData(const QDate &minDate, const QDate &maxDate, const int
     return queryAS400(AS400QueryType::Invoice, queryString, chunkSize);
 }
 
+
 bool AS400::getCustomerChains(const int chunkSize)
 {
     QString queryString = "SELECT CAST(BBSCMPN AS INT) AS \"companyNumber\", "
@@ -130,6 +63,51 @@ bool AS400::getCustomerChains(const int chunkSize)
                           "FROM PWRDTA.BBSCHNHP";
 
     return queryAS400(AS400QueryType::CustomerChain, queryString,chunkSize);
+}
+
+bool AS400::getOpenOrderHeaders(const int chunkSize)
+{
+    QString queryString = "SELECT oohcusn AS \"customerNumber\","
+                          "oohornr AS \"orderNumber\","
+                          "oohmemo AS \"memoCode\","
+                          "oohslnb AS \"salesRep\","
+                          "oohdtes AS \"shipDate\","
+                          "oohdtet AS \"orderDate\","
+                          "oohrten AS \"route\","
+                          "oohstpn AS \"stop\","
+                          "oohinsi AS \"specialInstructions1\","
+                          "oohins2 AS \"specialInstructions2\","
+                          "oohpono AS \"customerPO\","
+                          "oohoalc AS \"allocatedFlag\","
+                          "oohpkpr AS \"pickTicketPrinted\","
+                          "oohinam AS \"totalInvoiceAmount\","
+                          "oohexac AS \"actualAmount\","
+                          "oohexcb AS \"caseCube\","
+                          "oohexsh AS \"shipWeight\","
+                          "oohqyoa AS \"totalQtyOrdered\","
+                          "oohqysa AS \"totalQtyShipped\" "
+                          "FROM pwrdta.OOHORDHPS";
+
+    return queryAS400(AS400QueryType::OpenOrderHeader, queryString, chunkSize);
+}
+
+bool AS400::getOpenOrderDetails(const int chunkSize)
+{
+    QString queryString = "Select ooiornr AS \"orderNumber\","
+                          "CAST(replace(ooiitmn,'-','') AS BIGINT) AS \"itemNumber\","
+                          "ooiqyoa AS \"qtyOrdered\","
+                          "ooiqysa AS \"qtyShipped\","
+                          "ooiwhna AS \"warehouseArea\","
+                          "ooiisle AS \"aisle\","
+                          "ooisltn AS \"slot\","
+                          "ooibuyn AS \"buyerNumber\","
+                          "ooivndn AS \"vendorNumber\","
+                          "ooisbcc AS \"substituteFlag\","
+                          "ooiitmo As \"itemNumberBeforeSub\","
+                          "ooiuwnr AS \"uow\" "
+                          "FROM pwrdta.OOIORDDPS";
+
+    return queryAS400(AS400QueryType::OpenOrderDetail, queryString, chunkSize);
 }
 
 bool AS400::getCustomerData()
@@ -147,12 +125,17 @@ bool AS400::getRouteAssignmentData()
 bool AS400::queryAS400(const AS400QueryType queryType, const QString &queryString, const int chunkSize)
 {
     bool success = false;
-    emit debugMessage(AS400Settings_["connectString"].toString());
+    QString connectString = "DRIVER={"
+            + AS400Settings_["driver"].toString()
+            + "};SYSTEM="
+            + AS400Settings_["system"].toString()
+            + ";";
+    emit debugMessage(connectString);
     {
         QSqlDatabase odbc = QSqlDatabase::addDatabase("QODBC", "AS400");
         odbc.setUserName(AS400Settings_["username"].toString());
         odbc.setPassword(AS400Settings_["password"].toString());
-        odbc.setDatabaseName(AS400Settings_["connectString"].toString());
+        odbc.setDatabaseName(connectString);
 
         if(odbc.open())
         {
@@ -188,26 +171,24 @@ bool AS400::queryAS400(const AS400QueryType queryType, const QString &queryStrin
 
 void AS400::processQuery(const AS400QueryType queryType, QSqlQuery &query,const int chunkSize)
 {
+    bool firstRun = true;
     int recordCounter = 0;
     QMap<QString,QVariantList> sqlData;
-
     while(query.next())
     {
         if(recordCounter == chunkSize)
         {
-            //Count the amt of records.
+            if(sqlData.isEmpty())
+            {
+                emit debugMessage("AS400 query returned an empty result set - not emitting to MySQL");
+                return;
+            }
+
+            //Count the amt of records. Explodes if chunk size is zero, etc.
             emit debugMessage(QString("Retrieved " +  QString::number(sqlData.first().size()) + " records from AS400."));
 
-            switch (queryType)
-            {
-            case AS400QueryType::Invoice :
-                emit invoiceDataResults(sqlData);
-                break;
-
-            case AS400QueryType::CustomerChain :
-                emit customerChainResults(sqlData);
-                break;
-            }
+            dispatchSqlResults(firstRun, queryType, sqlData);
+            firstRun = false;
 
             for(auto key: sqlData.keys())
             {
@@ -227,20 +208,41 @@ void AS400::processQuery(const AS400QueryType queryType, QSqlQuery &query,const 
     //Count the amt of records.
     emit debugMessage(QString("Retrieved " +  QString::number(sqlData.first().size()) + " records from AS400."));
 
-    switch (queryType)
+    if(sqlData.isEmpty())
     {
-    case AS400QueryType::Invoice :
-        emit invoiceDataResults(sqlData);
-        break;
-
-    case AS400QueryType::CustomerChain :
-        emit customerChainResults(sqlData);
-        break;
+        emit debugMessage("AS400 query returned an empty result set - not emitting to MySQL");
+        return;
     }
+
+    dispatchSqlResults(firstRun, queryType, sqlData);
 
     for(auto key: sqlData.keys())
         sqlData[key].clear();
 
     sqlData.clear();
+    return;
 }
 
+void AS400::dispatchSqlResults(const bool isFirstRun,
+                               const AS400QueryType queryType,
+                               const QMap<QString, QVariantList> &sqlResults)
+{
+    switch (queryType)
+    {
+    case AS400QueryType::Invoice :
+        emit invoiceDataResults(sqlResults);
+        break;
+
+    case AS400QueryType::CustomerChain :
+        emit customerChainResults(sqlResults);
+        break;
+
+    case AS400QueryType::OpenOrderHeader :
+        emit openOrderHeaderResults(isFirstRun, sqlResults);
+        break;
+
+    case AS400QueryType::OpenOrderDetail :
+        emit openOrderDetailResults(isFirstRun, sqlResults);
+        break;
+    }
+}

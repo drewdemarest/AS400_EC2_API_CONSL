@@ -8,129 +8,100 @@ MySQL::MySQL(QObject *parent) : QObject(parent)
 void MySQL::init()
 {
     connect(&settings_, &JsonSettings::debugMessage, this, &MySQL::debugMessage);
-
-    std::cout << "Input new MySQL settings? y/n: ";
-
-    //Total hack to make an input dialog that just expires
-    //and sets iteself to a default value.
-    InputSettingsThread* settingsThread = new InputSettingsThread();
-    connect(settingsThread, &InputSettingsThread::result, this, &MySQL::handleSettingsDialog);
-    connect(settingsThread, &InputSettingsThread::debugMessage, this, &MySQL::debugMessage);
-    connect(settingsThread, &InputSettingsThread::finished, settingsThread, &QObject::deleteLater);
-    settingsThread->start();
-
-    QTimer timer;
-    timer.setSingleShot(true);
-    timer.start(30000);
-    while(timer.isActive() && !settingsThread->isFinished())
-    {
-        qApp->processEvents();
-    }
-    if(!settingsThread->isFinished())
-    {
-        qDebug() << endl;
-        emit debugMessage("No response from user after 30sec, using any existing settings");
-        settingsThread->quit();
-        handleSettingsDialog(false);
-        settingsThread->deleteLater();
-    }
+    mySQLSettings_ = settings_.loadSettings(QFile(dbPath_), mySQLSettings_);
 }
 
-void MySQL::handleSettingsDialog(bool inputNewSettings)
-{
-    if(inputNewSettings)
-        inputMySQLSettings();
-
-    if(!inputNewSettings)
-        mySQLSettings_ = settings_.loadSettings(QFile(qApp->applicationDirPath() + "/mysqlsettings.db"), mySQLSettings_);
-}
-
-void MySQL::inputMySQLSettings()
-{
-    QTextStream s(stdin);
-    QString dirBool;
-    QString password;
-    QString username;
-    QString databaseName;
-    QString hostName;
-    QString caFullPath;
-    QString clientKeyFullPath;
-    QString clientCertFullPath;
-
-    std::cout << "Set hostname or IP: ";
-    hostName = s.readLine();
-
-    std::cout << "Set database name: ";
-    databaseName = s.readLine();
-
-    std::cout << "Set username: ";
-    username = s.readLine();
-
-    std::cout << "Set password: ";
-    password = s.readLine();
-
-    std::cout << "Use .exe directory for certs and ca? y/n: ";
-    dirBool = s.readLine();
-
-    if(!(dirBool == "y" || dirBool == "n"))
-    {
-        emit debugMessage("MySQL user input error: incorrect user input for ssl cert locations. Input not y or n");
-        emit debugMessage("Using .exe directory as default");
-    }
-    if(dirBool == "y")
-    {
-        std::cout << "Set CA cert name: ";
-        caFullPath = "SSL_CA=" + qApp->applicationDirPath() + "/" + s.readLine() + ";";
-
-        std::cout << "Set client key file name: ";
-        clientKeyFullPath = "SSL_KEY=" + qApp->applicationDirPath() + "/" + s.readLine() + ";";
-
-        std::cout << "Set client cert file name: ";
-        clientCertFullPath = "SSL_CERT=" + qApp->applicationDirPath() + "/" + s.readLine() + ";";
-    }
-
-    if(dirBool == "n")
-    {
-        std::cout << "Set CA full file path: ";
-        caFullPath = "SSL_CA=" + s.readLine() + ";";
-
-        std::cout << "Set client key full file path: ";
-        clientKeyFullPath = "SSL_KEY=" + s.readLine() + ";";
-
-        std::cout << "Set client cert full file path: ";
-        clientCertFullPath = "SSL_CERT=" + s.readLine() + ";";
-    }
-
-    qDebug() << "Please review settings.";
-    qDebug() << password;
-    qDebug() << username;
-    qDebug() << databaseName;
-    qDebug() << hostName;
-    qDebug() << caFullPath;
-    qDebug() << clientKeyFullPath;
-    qDebug() << clientCertFullPath;
-
-    mySQLSettings_["password"] = password;
-    mySQLSettings_["userName"] = username;
-    mySQLSettings_["databaseName"] = databaseName;
-    mySQLSettings_["hostName"] = hostName;
-    mySQLSettings_["caStr"] = caFullPath;
-    mySQLSettings_["clientKeyStr"] = clientKeyFullPath;
-    mySQLSettings_["clientCertStr"] = clientCertFullPath;
-
-    settings_.saveSettings(QFile(qApp->applicationDirPath() + "/mysqlsettings.db"), mySQLSettings_);
-}
-
-bool MySQL::exportInvoiceResults(QMap<QString, QVariantList> invoiceResults)
+bool MySQL::exportInvoiceResults(QMap<QString, QVariantList> sqlResutls)
 {
     QString tableName = "invoice";
-    return exportResults(tableName,invoiceResults);
+    return exportResults(tableName,sqlResutls);
 }
 
-bool MySQL::exportCustomerChainResults(QMap<QString, QVariantList> invoiceResults)
+bool MySQL::exportCustomerChainResults(QMap<QString, QVariantList> sqlResutls)
 {
     QString tableName = "customerChain";
-    return exportResults(tableName,invoiceResults);
+    return exportResults(tableName,sqlResutls);
+}
+
+bool MySQL::exportOpenOrderHeaderResult(bool needToTruncate, QMap<QString, QVariantList> sqlResutls)
+{
+    QString tableName = "openOrderHeader";
+    if(needToTruncate)
+    {
+        if(truncateATable(tableName))
+            return exportResults(tableName,sqlResutls);
+
+        else
+            return false;
+    }
+    else
+        return exportResults(tableName,sqlResutls);
+}
+
+bool MySQL::exportOpenOrderDetailResult(bool needToTruncate, QMap<QString, QVariantList> sqlResutls)
+{
+    QString tableName = "openOrderDetail";
+
+    if(needToTruncate)
+    {
+        if(truncateATable(tableName))
+            return exportResults(tableName,sqlResutls);
+
+        else
+            return false;
+    }
+    else
+        return exportResults(tableName,sqlResutls);
+}
+
+bool MySQL::truncateATable(const QString &tableName)
+{
+    QString truncateTableQuery = "TRUNCATE " + tableName;
+
+    bool success = false;
+
+    {
+        QSqlDatabase sslDB = QSqlDatabase::addDatabase("QMYSQL", mySQLSettings_["databaseName"].toString());
+
+        QString connectString =   "SSL_CA=" + mySQLSettings_["caStr"].toString() + ";"
+                                + "SSL_KEY=" + mySQLSettings_["clientKeyStr"].toString() + ";"
+                                + "SSL_CERT=" + mySQLSettings_["clientCertStr"].toString() + ";";
+
+        emit debugMessage("Beginning MySQL upload");
+        sslDB.setHostName(mySQLSettings_["hostName"].toString());
+        sslDB.setDatabaseName(mySQLSettings_["databaseName"].toString());
+        sslDB.setUserName(mySQLSettings_["userName"].toString());
+        sslDB.setPassword(mySQLSettings_["password"].toString());
+        sslDB.setConnectOptions(connectString);
+
+        if(sslDB.open())
+        {
+            QSqlQuery query(sslDB);
+            success = query.exec(truncateTableQuery);
+            if(!success)
+            {
+                emit debugMessage("Failed to truncate MySQL database "
+                                    + mySQLSettings_["databaseName"].toString()
+                                    + " for table "
+                                    + tableName);
+
+                emit debugMessage("Truncate query error: " + query.lastError().text());
+            }
+        }
+        else
+        {
+            emit debugMessage("Failed to open MySQL database.");
+            emit debugMessage(sslDB.lastError().text());
+        }
+
+        sslDB.close();
+        emit debugMessage("Finished MySQL. Truncated database "
+                            + mySQLSettings_["databaseName"].toString()
+                            + " for table " + tableName);
+    }
+    emit debugMessage("Cleaning up MySQL " + mySQLSettings_["databaseName"].toString() + " connection.");
+    QSqlDatabase::removeDatabase(mySQLSettings_["databaseName"].toString());
+    return success;
 }
 
 bool MySQL::exportResults(const QString &tableName, QMap<QString, QVariantList> invoiceResults)
@@ -141,14 +112,17 @@ bool MySQL::exportResults(const QString &tableName, QMap<QString, QVariantList> 
 
     {
         QSqlDatabase sslDB = QSqlDatabase::addDatabase("QMYSQL", mySQLSettings_["databaseName"].toString());
+
+        QString connectString =   "SSL_CA=" + mySQLSettings_["caStr"].toString() + ";"
+                                + "SSL_KEY=" + mySQLSettings_["clientKeyStr"].toString() + ";"
+                                + "SSL_CERT=" + mySQLSettings_["clientCertStr"].toString() + ";";
+
         emit debugMessage("Beginning MySQL upload");
         sslDB.setHostName(mySQLSettings_["hostName"].toString());
         sslDB.setDatabaseName(mySQLSettings_["databaseName"].toString());
         sslDB.setUserName(mySQLSettings_["userName"].toString());
         sslDB.setPassword(mySQLSettings_["password"].toString());
-        sslDB.setConnectOptions(mySQLSettings_["caStr"].toString()
-                + mySQLSettings_["clientKeyStr"].toString()
-                + mySQLSettings_["clientCertStr"].toString());
+        sslDB.setConnectOptions(connectString);
 
         if(sslDB.open())
         {
