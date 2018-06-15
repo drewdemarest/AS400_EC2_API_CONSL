@@ -28,5 +28,4 @@ HEADERS += \
     database_connectors/mysql.h \
     log_writer/logwriter.h \
     json_settings/jsonsettings.h \
-    database_connectors/oot_dialogs/inputsettingsthread.hpp \
     upload/uploadschedule.h

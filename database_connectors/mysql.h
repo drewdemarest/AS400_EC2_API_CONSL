@@ -9,7 +9,6 @@
 #include <iostream>
 //Custom
 #include "json_settings/jsonsettings.h"
-#include "oot_dialogs/inputsettingsthread.hpp"
 
 class MySQL : public QObject
 {
@@ -40,8 +39,6 @@ private:
                                      {"databaseName",    QJsonValue()},
                                      {"userName",        QJsonValue()},
                                      {"password",        QJsonValue()}};
-
-
 
     QStringList generateValueTuples(QMap<QString, QVariantList> invoiceResults);
     bool executeQueryAsBatch(QSqlDatabase &db, const QString &tableName, QMap<QString, QVariantList> invoiceResults);

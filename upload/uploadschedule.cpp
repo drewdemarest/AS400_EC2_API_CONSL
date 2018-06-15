@@ -67,137 +67,96 @@ void UploadSchedule::runAS400OpenOrderDetailUpload()
     as400_.getOpenOrderDetails(openOrderDetailSettings_["chunkSize"].toString().toInt());
 }
 
-//-----------------------------------------------------------------------------
-// CREATE A SINGLE FUNCTION AND CALL IN A LOOP!
-// Everything below this here ain't sustainable.
-//-----------------------------------------------------------------------------
+void UploadSchedule::setupDailySchedule(QTimer *uploadTimer, void (UploadSchedule::*queryFunc)())
+{
+    connect(uploadTimer, &QTimer::timeout, this, queryFunc);
+    uploadTimer->setSingleShot(false);
+    uploadTimer->start(86400000);
+    (this->*queryFunc)();
+}
 
 void UploadSchedule::beginDailyInvoiceUpload()
 {
-    connect(invoiceUploadTimer_, SIGNAL(timeout()), this, SLOT(runAS400InvoiceUpload()));
-    invoiceUploadTimer_->setSingleShot(86400000);
-    invoiceUploadTimer_->start(86400000);
-    runAS400InvoiceUpload();
+    setupDailySchedule(invoiceUploadTimer_, &runAS400InvoiceUpload);
 }
 
 void UploadSchedule::beginDailyCustomerChainUpload()
 {
-    connect(customerChainUploadTimer_, SIGNAL(timeout()), this, SLOT(runAS400CustomerChains()));
-    customerChainUploadTimer_->setSingleShot(false);
-    customerChainUploadTimer_->start(86400000);
-    runAS400CustomerChains();
+    setupDailySchedule(customerChainUploadTimer_, &runAS400CustomerChains);
 }
 
 void UploadSchedule::beginDailyOpenOrderHeaderUpload()
 {
-    connect(openOrderHeaderUploadTimer_, SIGNAL(timeout()), this, SLOT(runAS400OpenOrderHeaderUpload()));
-    openOrderHeaderUploadTimer_->setSingleShot(false);
-    openOrderHeaderUploadTimer_->start(86400000);
-    runAS400OpenOrderHeaderUpload();
+    setupDailySchedule(openOrderHeaderUploadTimer_, &runAS400OpenOrderHeaderUpload);
 }
 
 void UploadSchedule::beginDailyOpenOrderDetailUpload()
 {
-    connect(openOrderDetailUploadTimer_, SIGNAL(timeout()), this, SLOT(runAS400OpenOrderDetailUpload()));
-    openOrderDetailUploadTimer_->setSingleShot(false);
-    openOrderDetailUploadTimer_->start(86400000);
-    runAS400OpenOrderDetailUpload();
+    setupDailySchedule(openOrderDetailUploadTimer_, &runAS400OpenOrderDetailUpload);
 }
 
-void UploadSchedule::configInvoiceUpload()
+void UploadSchedule::configUpload(QJsonObject querySettings,
+                                  QTimer *uploadTimer,
+                                  QTimer *uploadDailyTimer,
+                                  void (UploadSchedule::*queryFunc)(),
+                                  void (UploadSchedule::*dailyUploadFunc)())
 {
-    if(invoiceQuerySettings_["usingUploadInterval"].toString().toInt())
+    if(querySettings["usingUploadInterval"].toString().toInt())
     {
-        connect(invoiceUploadTimer_, SIGNAL(timeout()), this, SLOT(runAS400InvoiceUpload()));
-        invoiceUploadTimer_->start(jsonValueToLongLong(invoiceQuerySettings_["invoiceInterval"]));
-        runAS400InvoiceUpload();
+        connect(uploadTimer, &QTimer::timeout, this, queryFunc);
+        uploadTimer->start(jsonValueToLongLong(querySettings["invoiceInterval"]));
+        (this->*queryFunc)();
     }
 
-    if(invoiceQuerySettings_["usingUploadDaily"].toString().toInt())
+    if(querySettings["usingUploadDaily"].toString().toInt())
     {
         qint64 msUntilExec =
                 QTime::currentTime().msecsTo
-                (QTime::fromString(invoiceQuerySettings_["dailyUploadTime"].toString(), Qt::ISODate));
+                (QTime::fromString(querySettings["dailyUploadTime"].toString(), Qt::ISODate));
 
         if(msUntilExec <= 0)
             msUntilExec = 86400000 + msUntilExec;
 
-        connect(invoiceUploadDailyTimer_, SIGNAL(timeout()), this, SLOT(beginDailyInvoiceUpload()));
-        invoiceUploadDailyTimer_->setSingleShot(true);
+        connect(uploadDailyTimer, &QTimer::timeout, this, dailyUploadFunc);
+        uploadDailyTimer->setSingleShot(true);
         invoiceUploadDailyTimer_->start(msUntilExec);
     }
 }
 
+void UploadSchedule::configInvoiceUpload()
+{
+    configUpload(invoiceQuerySettings_,
+                 invoiceUploadTimer_,
+                 invoiceUploadDailyTimer_,
+                 &runAS400InvoiceUpload,
+                 &configInvoiceUpload);
+}
+
 void UploadSchedule::configOpenOrderHeaderUpload()
 {
-    if(openOrderHeaderSettings_["usingUploadInterval"].toString().toInt())
-    {
-        connect(openOrderHeaderUploadTimer_, SIGNAL(timeout()), this, SLOT(runAS400OpenOrderHeaderUpload()));
-        openOrderHeaderUploadTimer_->start(jsonValueToLongLong(openOrderHeaderSettings_["invoiceInterval"]));
-        runAS400OpenOrderHeaderUpload();
-    }
-
-    if(openOrderHeaderSettings_["usingUploadDaily"].toString().toInt())
-    {
-        qint64 msUntilExec =
-                QTime::currentTime().msecsTo
-                (QTime::fromString(openOrderHeaderSettings_["dailyUploadTime"].toString(), Qt::ISODate));
-
-        if(msUntilExec <= 0)
-            msUntilExec = 86400000 + msUntilExec;
-
-        connect(openOrderHeaderUploadDailyTimer_, SIGNAL(timeout()), this, SLOT(beginDailyOpenOrderHeaderUpload()));
-        openOrderHeaderUploadDailyTimer_->setSingleShot(true);
-        openOrderHeaderUploadDailyTimer_->start(msUntilExec);
-    }
+    configUpload(openOrderHeaderSettings_,
+                 openOrderHeaderUploadTimer_,
+                 openOrderHeaderUploadDailyTimer_,
+                 &runAS400OpenOrderHeaderUpload,
+                 &configOpenOrderHeaderUpload);
 }
 
 void UploadSchedule::configOpenOrderDetailUpload()
 {
-    if(openOrderDetailSettings_["usingUploadInterval"].toString().toInt())
-    {
-        connect(openOrderDetailUploadTimer_, SIGNAL(timeout()), this, SLOT(runAS400OpenOrderDetailUpload()));
-        openOrderDetailUploadTimer_->start(jsonValueToLongLong(openOrderDetailSettings_["invoiceInterval"]));
-        runAS400OpenOrderDetailUpload();
-    }
-
-    if(openOrderDetailSettings_["usingUploadDaily"].toString().toInt())
-    {
-        qint64 msUntilExec =
-                QTime::currentTime().msecsTo
-                (QTime::fromString(openOrderDetailSettings_["dailyUploadTime"].toString(), Qt::ISODate));
-
-        if(msUntilExec <= 0)
-            msUntilExec = 86400000 + msUntilExec;
-
-        connect(openOrderDetailUploadDailyTimer_, SIGNAL(timeout()), this, SLOT(beginDailyOpenOrderHeaderUpload()));
-        openOrderDetailUploadDailyTimer_->setSingleShot(true);
-        openOrderDetailUploadDailyTimer_->start(msUntilExec);
-    }
+    configUpload(openOrderDetailSettings_,
+                 openOrderDetailUploadTimer_,
+                 openOrderDetailUploadDailyTimer_,
+                 &runAS400OpenOrderDetailUpload,
+                 &configOpenOrderDetailUpload);
 }
 
 void UploadSchedule::configCustomerChainUpload()
 {
-    if(custChainQuerySettings_["usingUploadInterval"].toString().toInt())
-    {
-        connect(customerChainUploadTimer_, SIGNAL(timeout()), this, SLOT(runAS400CustomerChains()));
-        customerChainUploadTimer_->start(jsonValueToLongLong(custChainQuerySettings_["invoiceInterval"]));
-        runAS400InvoiceUpload();
-    }
-
-    if(custChainQuerySettings_["usingUploadDaily"].toString().toInt())
-    {
-        qint64 msUntilExec =
-                QTime::currentTime().msecsTo
-                (QTime::fromString(custChainQuerySettings_["dailyUploadTime"].toString(), Qt::ISODate));
-
-        if(msUntilExec <= 0)
-            msUntilExec = 86400000 + msUntilExec;
-
-        connect(customerChainUploadDailyTimer_, SIGNAL(timeout()), this, SLOT(beginDailyCustomerChainUpload()));
-        customerChainUploadDailyTimer_->setSingleShot(true);
-        customerChainUploadDailyTimer_->start(msUntilExec);
-    }
+    configUpload(custChainQuerySettings_,
+                 customerChainUploadTimer_,
+                 customerChainUploadDailyTimer_,
+                 &runAS400CustomerChains,
+                 &configCustomerChainUpload);
 }
 
 long long UploadSchedule::jsonValueToLongLong(const QJsonValue &value)

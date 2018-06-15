@@ -2,13 +2,12 @@
 
 MySQL::MySQL(QObject *parent) : QObject(parent)
 {
-
+    mySQLSettings_ = settings_.loadSettings(QFile(dbPath_), mySQLSettings_);
 }
 
 void MySQL::init()
 {
     connect(&settings_, &JsonSettings::debugMessage, this, &MySQL::debugMessage);
-    mySQLSettings_ = settings_.loadSettings(QFile(dbPath_), mySQLSettings_);
 }
 
 bool MySQL::exportInvoiceResults(QMap<QString, QVariantList> sqlResutls)

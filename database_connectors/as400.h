@@ -8,7 +8,6 @@
 #include <iostream>
 //Custom
 #include "json_settings/jsonsettings.h"
-#include "oot_dialogs/inputsettingsthread.hpp"
 
 enum AS400QueryType {Invoice, CustomerChain, OpenOrderHeader, OpenOrderDetail};
 

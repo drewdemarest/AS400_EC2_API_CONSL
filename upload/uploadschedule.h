@@ -30,6 +30,8 @@ private slots:
     void beginDailyOpenOrderDetailUpload();
 
 private:
+    void setupDailySchedule(QTimer *uploadTimer, void (UploadSchedule::*queryFunc)());
+
     JsonSettings settings_;
     QString invoiceQueryDBPath_ = qApp->applicationDirPath() + "/invoiceQuery.db";
     QJsonObject invoiceQuerySettings_ =     {{"millisecondInterval",    QJsonValue()},
@@ -75,6 +77,12 @@ private:
 
     QTimer *openOrderDetailUploadTimer_       = new QTimer(this);
     QTimer *openOrderDetailUploadDailyTimer_  = new QTimer(this);
+
+    void configUpload(QJsonObject querySettings,
+                      QTimer *uploadTimer,
+                      QTimer *uploadDailyTimer,
+                      void (UploadSchedule::*queryFunc)(),
+                      void (UploadSchedule::*dailyUploadFunc)());
 
     void configInvoiceUpload();
     void configCustomerChainUpload();
